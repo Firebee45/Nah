@@ -100,9 +100,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🛒 Cart Deceleration Curve Analyzer</h1>
-
-```
+        <h1>Cart Deceleration Curve Analyzer</h1>
     <div class="file-input">
         <p>Select a file containing cart log data:</p>
         <input type="file" id="fileInput" accept=".txt,.log" />
@@ -348,6 +346,54 @@
         return data.length; // If never stops, return full length
     }
 
+    function interpolateSpline(data, targetPoints) {
+        if (data.length < 4) return data;
+        
+        // Simple spline interpolation using cubic interpolation
+        const result = [];
+        const n = data.length;
+        
+        for (let i = 0; i < targetPoints; i++) {
+            const t = i / (targetPoints - 1);
+            const index = t * (n - 1);
+            const baseIndex = Math.floor(index);
+            const fraction = index - baseIndex;
+            
+            if (baseIndex >= n - 1) {
+                result.push(data[n - 1]);
+                continue;
+            }
+            
+            // Get 4 points for cubic interpolation
+            const p0 = data[Math.max(0, baseIndex - 1)];
+            const p1 = data[baseIndex];
+            const p2 = data[Math.min(n - 1, baseIndex + 1)];
+            const p3 = data[Math.min(n - 1, baseIndex + 2)];
+            
+            // Cubic interpolation
+            const t2 = fraction * fraction;
+            const t3 = t2 * fraction;
+            
+            const x = 0.5 * (
+                (2 * p1.x) +
+                (-p0.x + p2.x) * fraction +
+                (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+                (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
+            );
+            
+            const y = 0.5 * (
+                (2 * p1.y) +
+                (-p0.y + p2.y) * fraction +
+                (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+                (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
+            );
+            
+            result.push({ x, y });
+        }
+        
+        return result;
+    }
+
     function generateUniqueColors(count) {
         // High contrast colors optimized for dark backgrounds
         const baseColors = [
@@ -406,10 +452,18 @@
                 if (decelerationData.length > 0) {
                     // Reset time to start from 0 at deceleration start
                     const startTime = decelerationData[0].time;
-                    const adjustedData = decelerationData.map(point => ({
+                    let adjustedData = decelerationData.map(point => ({
                         x: point.time - startTime,
                         y: point.x
                     }));
+                    
+                    // Apply smoothing based on data density
+                    const dataPoints = adjustedData.length;
+                    const targetPoints = Math.min(dataPoints * 2, 500); // Adaptive interpolation
+                    
+                    if (dataPoints > 10 && targetPoints > dataPoints) {
+                        adjustedData = interpolateSpline(adjustedData, targetPoints);
+                    }
                     
                     const color = colors[colorIndex];
                     
@@ -419,10 +473,11 @@
                         borderColor: color,
                         backgroundColor: color + '20',
                         fill: false,
-                        tension: 0.1,
+                        tension: 0.4, // Increased tension for smoother curves
                         pointRadius: 0,
                         pointHoverRadius: 0,
-                        borderWidth: 2
+                        borderWidth: 2,
+                        cubicInterpolationMode: 'monotone' // Ensures smooth curves
                     });
                     
                     colorIndex++;
@@ -438,10 +493,18 @@
             if (decelerationData.length > 0) {
                 // Reset time to start from 0 at deceleration start
                 const startTime = decelerationData[0].time;
-                const adjustedData = decelerationData.map(point => ({
+                let adjustedData = decelerationData.map(point => ({
                     x: point.time - startTime,
                     y: point.x
                 }));
+                
+                // Apply smoothing based on data density
+                const dataPoints = adjustedData.length;
+                const targetPoints = Math.min(dataPoints * 2, 500);
+                
+                if (dataPoints > 10 && targetPoints > dataPoints) {
+                    adjustedData = interpolateSpline(adjustedData, targetPoints);
+                }
                 
                 datasets.push({
                     label: `Weight ${selectedWeight}`,
@@ -449,10 +512,11 @@
                     borderColor: '#51cf66',
                     backgroundColor: '#51cf6620',
                     fill: false,
-                    tension: 0.1,
+                    tension: 0.4, // Increased tension for smoother curves
                     pointRadius: 0,
                     pointHoverRadius: 0,
-                    borderWidth: 2
+                    borderWidth: 2,
+                    cubicInterpolationMode: 'monotone' // Ensures smooth curves
                 });
             }
         }
@@ -508,7 +572,5 @@
         }
     }
 </script>
-```
-
 </body>
 </html>
