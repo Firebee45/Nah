@@ -93,6 +93,31 @@
             margin: 10px 0;
             border: 1px solid #44cc44;
         }
+        .export-section {
+            margin: 15px 0;
+            padding: 15px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            border: 1px solid #555;
+        }
+        .export-btn {
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 5px;
+        }
+        .export-btn:hover {
+            background: #00b8e6;
+        }
+        .export-btn:disabled {
+            background: #555;
+            color: #999;
+            cursor: not-allowed;
+        }
         h1 {
             color: #00d4ff;
         }
@@ -100,7 +125,9 @@
 </head>
 <body>
     <div class="container">
-        <h1>Cart Deceleration Curve Analyzer</h1>
+        <h1>🛒 Cart Deceleration Curve Analyzer</h1>
+
+```
     <div class="file-input">
         <p>Select a file containing cart log data:</p>
         <input type="file" id="fileInput" accept=".txt,.log" />
@@ -114,6 +141,14 @@
         <select id="weightSelect">
             <option value="all">All Weights</option>
         </select>
+    </div>
+
+    <div class="export-section" id="exportSection" style="display: none;">
+        <h3>Export Analysis</h3>
+        <p>Download detailed deceleration analysis for all weights:</p>
+        <button class="export-btn" id="exportBtn" onclick="exportDecelerationData()">
+            📊 Export Deceleration Analysis (TXT)
+        </button>
     </div>
 
     <div class="stats" id="stats" style="display: none;">
@@ -461,9 +496,9 @@
                     const dataPoints = adjustedData.length;
                     const targetPoints = Math.min(dataPoints * 2, 500); // Adaptive interpolation
                     
-                    if (targetPoints > dataPoints) {
-    adjustedData = interpolateSpline(adjustedData, targetPoints);
-}
+                    if (dataPoints > 10 && targetPoints > dataPoints) {
+                        adjustedData = interpolateSpline(adjustedData, targetPoints);
+                    }
                     
                     const color = colors[colorIndex];
                     
@@ -557,6 +592,246 @@
         document.getElementById('avgDeceleration').textContent = avgDeceleration;
         
         document.getElementById('stats').style.display = 'grid';
+        document.getElementById('exportSection').style.display = 'block';
+    }
+
+    function calculateDecelerationMetrics(data) {
+        if (data.length < 3) return null;
+        
+        const metrics = {
+            totalDistance: 0,
+            totalTime: 0,
+            avgVelocity: 0,
+            maxVelocity: 0,
+            minVelocity: 0,
+            avgDeceleration: 0,
+            maxDeceleration: 0,
+            decelerationPoints: [],
+            velocityPoints: []
+        };
+        
+        // Calculate velocities and accelerations
+        for (let i = 1; i < data.length; i++) {
+            const dx = data[i].x - data[i-1].x;
+            const dt = data[i].time - data[i-1].time;
+            
+            if (dt > 0) {
+                const velocity = dx / dt;
+                metrics.velocityPoints.push({
+                    time: data[i].time,
+                    velocity: velocity,
+                    position: data[i].x
+                });
+                
+                if (velocity > metrics.maxVelocity) metrics.maxVelocity = velocity;
+                if (velocity < metrics.minVelocity) metrics.minVelocity = velocity;
+            }
+        }
+        
+        // Calculate accelerations (deceleration = negative acceleration)
+        for (let i = 1; i < metrics.velocityPoints.length; i++) {
+            const dv = metrics.velocityPoints[i].velocity - metrics.velocityPoints[i-1].velocity;
+            const dt = metrics.velocityPoints[i].time - metrics.velocityPoints[i-1].time;
+            
+            if (dt > 0) {
+                const acceleration = dv / dt;
+                metrics.decelerationPoints.push({
+                    time: metrics.velocityPoints[i].time,
+                    acceleration: acceleration,
+                    deceleration: -acceleration, // Positive deceleration
+                    velocity: metrics.velocityPoints[i].velocity
+                });
+                
+                if (Math.abs(acceleration) > metrics.maxDeceleration) {
+                    metrics.maxDeceleration = Math.abs(acceleration);
+                }
+            }
+        }
+        
+        // Calculate averages
+        if (metrics.velocityPoints.length > 0) {
+            metrics.avgVelocity = metrics.velocityPoints.reduce((sum, p) => sum + Math.abs(p.velocity), 0) / metrics.velocityPoints.length;
+        }
+        
+        if (metrics.decelerationPoints.length > 0) {
+            metrics.avgDeceleration = metrics.decelerationPoints.reduce((sum, p) => sum + Math.abs(p.acceleration), 0) / metrics.decelerationPoints.length;
+        }
+        
+        // Calculate total distance and time
+        if (data.length > 0) {
+            metrics.totalDistance = Math.abs(data[data.length - 1].x - data[0].x);
+            metrics.totalTime = data[data.length - 1].time - data[0].time;
+        }
+        
+        return metrics;
+    }
+
+    function exportDecelerationData() {
+        if (allParsedData.length === 0) {
+            showMessage('No data to export', 'error');
+            return;
+        }
+        
+        const exportData = [];
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        
+        exportData.push('===========================================');
+        exportData.push('CART DECELERATION ANALYSIS REPORT');
+        exportData.push('===========================================');
+        exportData.push(`Generated: ${new Date().toLocaleString()}`);
+        exportData.push(`Total Data Points: ${allParsedData.length}`);
+        exportData.push('');
+        
+        // Group by weight and analyze each
+        const weightGroups = {};
+        allParsedData.forEach(point => {
+            if (!weightGroups[point.weight]) {
+                weightGroups[point.weight] = [];
+            }
+            weightGroups[point.weight].push(point);
+        });
+        
+        const weightKeys = Object.keys(weightGroups).sort((a, b) => Number(a) - Number(b));
+        
+        // Summary table
+        exportData.push('SUMMARY BY WEIGHT:');
+        exportData.push('-------------------------------------------');
+        exportData.push('Weight | Avg Decel | Max Decel | Avg Velocity | Distance | Time');
+        exportData.push('-------|-----------|-----------|--------------|----------|------');
+        
+        const summaryData = [];
+        
+        weightKeys.forEach(weight => {
+            const fullData = weightGroups[weight];
+            const startIndex = findDecelerationStart(fullData);
+            const stopIndex = findStopPoint(fullData, startIndex);
+            const decelerationData = fullData.slice(startIndex, stopIndex);
+            
+            if (decelerationData.length > 0) {
+                // Reset time to start from 0 at deceleration start
+                const startTime = decelerationData[0].time;
+                const adjustedData = decelerationData.map(point => ({
+                    time: point.time - startTime,
+                    x: point.x,
+                    y: point.y,
+                    z: point.z
+                }));
+                
+                const metrics = calculateDecelerationMetrics(adjustedData);
+                
+                if (metrics) {
+                    summaryData.push({
+                        weight: weight,
+                        metrics: metrics,
+                        rawData: adjustedData
+                    });
+                    
+                    const line = `${weight.padStart(6)} | ${metrics.avgDeceleration.toFixed(3).padStart(9)} | ${metrics.maxDeceleration.toFixed(3).padStart(9)} | ${metrics.avgVelocity.toFixed(3).padStart(12)} | ${metrics.totalDistance.toFixed(2).padStart(8)} | ${metrics.totalTime.toFixed(1).padStart(4)}s`;
+                    exportData.push(line);
+                }
+            }
+        });
+        
+        exportData.push('');
+        exportData.push('===========================================');
+        exportData.push('DETAILED ANALYSIS BY WEIGHT');
+        exportData.push('===========================================');
+        
+        // Detailed analysis for each weight
+        summaryData.forEach(({ weight, metrics, rawData }) => {
+            exportData.push('');
+            exportData.push(`WEIGHT: ${weight}`);
+            exportData.push('-------------------------------------------');
+            exportData.push(`Total Distance: ${metrics.totalDistance.toFixed(3)} units`);
+            exportData.push(`Total Time: ${metrics.totalTime.toFixed(3)} seconds`);
+            exportData.push(`Average Velocity: ${metrics.avgVelocity.toFixed(3)} units/sec`);
+            exportData.push(`Maximum Velocity: ${metrics.maxVelocity.toFixed(3)} units/sec`);
+            exportData.push(`Minimum Velocity: ${metrics.minVelocity.toFixed(3)} units/sec`);
+            exportData.push(`Average Deceleration: ${metrics.avgDeceleration.toFixed(3)} units/sec²`);
+            exportData.push(`Maximum Deceleration: ${metrics.maxDeceleration.toFixed(3)} units/sec²`);
+            exportData.push('');
+            
+            // Top 10 highest deceleration moments
+            const topDecelerations = metrics.decelerationPoints
+                .sort((a, b) => b.deceleration - a.deceleration)
+                .slice(0, 10);
+            
+            if (topDecelerations.length > 0) {
+                exportData.push('Top 10 Highest Deceleration Moments:');
+                exportData.push('Time(s) | Deceleration | Velocity | Position');
+                exportData.push('--------|--------------|----------|----------');
+                
+                topDecelerations.forEach(point => {
+                    const line = `${point.time.toFixed(2).padStart(7)} | ${point.deceleration.toFixed(3).padStart(12)} | ${point.velocity.toFixed(3).padStart(8)} | ${point.velocity > 0 ? point.velocity.toFixed(2) : 'N/A'}`;
+                    exportData.push(line);
+                });
+            }
+            
+            exportData.push('');
+            
+            // Velocity profile (every 10th point to avoid too much data)
+            if (metrics.velocityPoints.length > 0) {
+                exportData.push('Velocity Profile (Sample Points):');
+                exportData.push('Time(s) | Velocity | Position');
+                exportData.push('--------|----------|----------');
+                
+                const step = Math.max(1, Math.floor(metrics.velocityPoints.length / 20));
+                for (let i = 0; i < metrics.velocityPoints.length; i += step) {
+                    const point = metrics.velocityPoints[i];
+                    const line = `${point.time.toFixed(2).padStart(7)} | ${point.velocity.toFixed(3).padStart(8)} | ${point.position.toFixed(3).padStart(8)}`;
+                    exportData.push(line);
+                }
+            }
+            
+            exportData.push('');
+            exportData.push('===========================================');
+        });
+        
+        // Add comparison analysis
+        if (summaryData.length > 1) {
+            exportData.push('');
+            exportData.push('COMPARATIVE ANALYSIS');
+            exportData.push('===========================================');
+            
+            const avgDecelerations = summaryData.map(s => s.metrics.avgDeceleration);
+            const maxDecelerations = summaryData.map(s => s.metrics.maxDeceleration);
+            const avgVelocities = summaryData.map(s => s.metrics.avgVelocity);
+            
+            exportData.push(`Highest Average Deceleration: Weight ${summaryData[avgDecelerations.indexOf(Math.max(...avgDecelerations))].weight} (${Math.max(...avgDecelerations).toFixed(3)} units/sec²)`);
+            exportData.push(`Lowest Average Deceleration: Weight ${summaryData[avgDecelerations.indexOf(Math.min(...avgDecelerations))].weight} (${Math.min(...avgDecelerations).toFixed(3)} units/sec²)`);
+            exportData.push(`Highest Peak Deceleration: Weight ${summaryData[maxDecelerations.indexOf(Math.max(...maxDecelerations))].weight} (${Math.max(...maxDecelerations).toFixed(3)} units/sec²)`);
+            exportData.push(`Fastest Average Speed: Weight ${summaryData[avgVelocities.indexOf(Math.max(...avgVelocities))].weight} (${Math.max(...avgVelocities).toFixed(3)} units/sec)`);
+            exportData.push(`Slowest Average Speed: Weight ${summaryData[avgVelocities.indexOf(Math.min(...avgVelocities))].weight} (${Math.min(...avgVelocities).toFixed(3)} units/sec)`);
+            
+            // Weight vs Performance correlation
+            exportData.push('');
+            exportData.push('Weight vs Performance Correlation:');
+            exportData.push('Weight | Decel Rate | Performance Index*');
+            exportData.push('-------|------------|------------------');
+            
+            summaryData.forEach(({ weight, metrics }) => {
+                const performanceIndex = (metrics.avgVelocity / metrics.avgDeceleration) * 100;
+                const line = `${weight.padStart(6)} | ${metrics.avgDeceleration.toFixed(3).padStart(10)} | ${performanceIndex.toFixed(1).padStart(17)}`;
+                exportData.push(line);
+            });
+            
+            exportData.push('');
+            exportData.push('*Performance Index = (Avg Velocity / Avg Deceleration) × 100');
+            exportData.push('Higher values indicate better performance (faster speed, lower deceleration)');
+        }
+        
+        // Create and download file
+        const blob = new Blob([exportData.join('\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cart-deceleration-analysis-${timestamp}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showMessage('Deceleration analysis exported successfully!', 'success');
     }
 
     function showMessage(text, type) {
@@ -572,5 +847,7 @@
         }
     }
 </script>
+```
+
 </body>
 </html>
