@@ -461,9 +461,9 @@
                     const dataPoints = adjustedData.length;
                     const targetPoints = Math.min(dataPoints * 2, 500); // Adaptive interpolation
                     
-                    if (dataPoints > 10 && targetPoints > dataPoints) {
-                        adjustedData = interpolateSpline(adjustedData, targetPoints);
-                    }
+                    if (targetPoints > dataPoints) {
+    adjustedData = interpolateSpline(adjustedData, targetPoints);
+}
                     
                     const color = colors[colorIndex];
                     
