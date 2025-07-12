@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cart Deceleration Curve Analyzer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        .container {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .file-input {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 2px dashed #555;
+            border-radius: 5px;
+            text-align: center;
+            background: #333;
+        }
+        .file-input input {
+            margin: 10px;
+            background: #444;
+            color: #e0e0e0;
+            border: 1px solid #666;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #3a3a3a;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #555;
+        }
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+        .stat-label {
+            color: #bbb;
+            font-size: 0.9em;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-top: 20px;
+        }
+        .weight-selector {
+            margin: 15px 0;
+        }
+        .weight-selector select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #666;
+            background: #444;
+            color: #e0e0e0;
+        }
+        .weight-selector label {
+            color: #e0e0e0;
+        }
+        .error {
+            color: #ff6b6b;
+            padding: 10px;
+            background: #3d1a1a;
+            border-radius: 4px;
+            margin: 10px 0;
+            border: 1px solid #cc4444;
+        }
+        .success {
+            color: #51cf66;
+            padding: 10px;
+            background: #1a3d1a;
+            border-radius: 4px;
+            margin: 10px 0;
+            border: 1px solid #44cc44;
+        }
+        h1 {
+            color: #00d4ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛒 Cart Deceleration Curve Analyzer</h1>
+
+```
+    <div class="file-input">
+        <p>Select a file containing cart log data:</p>
+        <input type="file" id="fileInput" accept=".txt,.log" />
+        <p><small>Expected format: timestamp[Scripting][inform]-Cart -ID (type) → x=X, y=Y, z=Z, weight=W</small></p>
+    </div>
+
+    <div id="message"></div>
+
+    <div class="weight-selector" id="weightSelector" style="display: none;">
+        <label for="weightSelect">Select Weight to Display:</label>
+        <select id="weightSelect">
+            <option value="all">All Weights</option>
+        </select>
+    </div>
+
+    <div class="stats" id="stats" style="display: none;">
+        <div class="stat-card">
+            <div class="stat-value" id="totalEntries">0</div>
+            <div class="stat-label">Total Entries</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="uniqueWeights">0</div>
+            <div class="stat-label">Unique Weights</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="timeRange">0s</div>
+            <div class="stat-label">Time Range</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="avgDeceleration">0</div>
+            <div class="stat-label">Avg Deceleration</div>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="decelerationChart"></canvas>
+    </div>
+</div>
+
+<script>
+    let cartData = [];
+    let chart = null;
+    let allParsedData = [];
+
+    // Initialize empty chart
+    const ctx = document.getElementById('decelerationChart').getContext('2d');
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: []
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Cart Position Over Time (X-Coordinate)',
+                    color: '#e0e0e0'
+                },
+                legend: {
+                    display: true,
+                    labels: {
+                        color: '#e0e0e0'
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    position: 'bottom',
+                    title: {
+                        display: true,
+                        text: 'Time (seconds)',
+                        color: '#e0e0e0'
+                    },
+                    ticks: {
+                        color: '#e0e0e0'
+                    },
+                    grid: {
+                        color: '#444'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'X Coordinate',
+                        color: '#e0e0e0'
+                    },
+                    ticks: {
+                        color: '#e0e0e0'
+                    },
+                    grid: {
+                        color: '#444'
+                    }
+                }
+            }
+        }
+    });
+
+    document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+    document.getElementById('weightSelect').addEventListener('change', updateChart);
+
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                parseCartData(e.target.result);
+                showMessage('File loaded successfully!', 'success');
+            } catch (error) {
+                showMessage('Error parsing file: ' + error.message, 'error');
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    function parseCartData(fileContent) {
+        const lines = fileContent.split('\n');
+        const parsedData = [];
+        
+        // Regex to match the log format
+        const logRegex = /(\d{2}:\d{2}:\d{2})\[Scripting\]\[inform\]-Cart\s+-?\d+\s+\([^)]+\)\s+→\s+x=([^,]+),\s+y=([^,]+),\s+z=([^,]+),\s+weight=(\d+)/;
+        
+        let baseTime = null;
+        
+        for (let line of lines) {
+            line = line.trim();
+            if (!line) continue;
+            
+            const match = line.match(logRegex);
+            if (match) {
+                const [, timeStr, xStr, yStr, zStr, weightStr] = match;
+                
+                // Parse time
+                const [hours, minutes, seconds] = timeStr.split(':').map(Number);
+                const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+                
+                // Set base time from first entry
+                if (baseTime === null) {
+                    baseTime = totalSeconds;
+                }
+                
+                const relativeTime = totalSeconds - baseTime;
+                
+                parsedData.push({
+                    time: relativeTime,
+                    x: parseFloat(xStr),
+                    y: parseFloat(yStr),
+                    z: parseFloat(zStr),
+                    weight: parseInt(weightStr),
+                    timestamp: timeStr
+                });
+            }
+        }
+        
+        if (parsedData.length === 0) {
+            throw new Error('No valid cart data found in file');
+        }
+        
+        // Sort by time
+        parsedData.sort((a, b) => a.time - b.time);
+        
+        allParsedData = parsedData;
+        setupWeightSelector();
+        updateStats();
+        updateChart();
+    }
+
+    function setupWeightSelector() {
+        const weights = [...new Set(allParsedData.map(d => d.weight))].sort((a, b) => a - b);
+        const select = document.getElementById('weightSelect');
+        
+        // Clear existing options except "All Weights"
+        select.innerHTML = '<option value="all">All Weights</option>';
+        
+        weights.forEach(weight => {
+            const option = document.createElement('option');
+            option.value = weight;
+            option.textContent = `Weight ${weight}`;
+            select.appendChild(option);
+        });
+        
+        document.getElementById('weightSelector').style.display = 'block';
+    }
+
+    function findDecelerationStart(data) {
+        if (data.length < 3) return 0;
+        
+        // Calculate velocity between consecutive points
+        const velocities = [];
+        for (let i = 1; i < data.length; i++) {
+            const dx = data[i].x - data[i-1].x;
+            const dt = data[i].time - data[i-1].time;
+            if (dt > 0) {
+                velocities.push({ index: i, velocity: dx / dt });
+            }
+        }
+        
+        if (velocities.length < 2) return 0;
+        
+        // Find the point where velocity starts consistently decreasing
+        // Look for the maximum velocity and start from there
+        let maxVelocityIndex = 0;
+        let maxVelocity = velocities[0].velocity;
+        
+        for (let i = 0; i < velocities.length; i++) {
+            if (velocities[i].velocity > maxVelocity) {
+                maxVelocity = velocities[i].velocity;
+                maxVelocityIndex = i;
+            }
+        }
+        
+        // Start from the maximum velocity point
+        return velocities[maxVelocityIndex].index;
+    }
+
+    function findStopPoint(data, startIndex) {
+        if (data.length < startIndex + 3) return data.length;
+        
+        const threshold = 0.001; // Movement threshold - adjust as needed
+        const checkWindow = 3; // Check this many consecutive points
+        
+        for (let i = startIndex + checkWindow; i < data.length; i++) {
+            let isStationary = true;
+            
+            // Check if cart has been stationary for 'checkWindow' points
+            for (let j = 0; j < checkWindow; j++) {
+                const dx = Math.abs(data[i - j].x - data[i - j - 1].x);
+                if (dx > threshold) {
+                    isStationary = false;
+                    break;
+                }
+            }
+            
+            if (isStationary) {
+                return i - checkWindow + 1; // Return the first point where it stopped
+            }
+        }
+        
+        return data.length; // If never stops, return full length
+    }
+
+    function generateUniqueColors(count) {
+        // High contrast colors optimized for dark backgrounds
+        const baseColors = [
+            '#ff6b6b', '#51cf66', '#339af0', '#ffd43b', '#ff8cc8',
+            '#69db7c', '#74c0fc', '#ffa8a8', '#b197fc', '#63e6be',
+            '#91a7ff', '#ffc947', '#ff9ff3', '#8ce99a', '#74dbf4',
+            '#ffd966', '#da77f2', '#96f2d7', '#a78bfa', '#fed7aa',
+            '#f783ac', '#bfdbfe', '#fde68a', '#c084fc', '#86efac',
+            '#fbbf24', '#f472b6', '#60a5fa', '#a3e635', '#fb7185',
+            '#34d399', '#fbbf24', '#e879f9', '#22d3ee', '#fb923c',
+            '#4ade80', '#818cf8', '#facc15', '#f87171', '#06b6d4'
+        ];
+        
+        const colors = [];
+        
+        for (let i = 0; i < count; i++) {
+            if (i < baseColors.length) {
+                colors.push(baseColors[i]);
+            } else {
+                // Generate additional colors using HSL with high saturation and lightness
+                const hue = (i * 137.508) % 360; // Golden angle approximation
+                const saturation = 80 + (i % 3) * 10;
+                const lightness = 60 + (i % 4) * 10;
+                colors.push(`hsl(${hue}, ${saturation}%, ${lightness}%)`);
+            }
+        }
+        
+        return colors;
+    }
+
+    function updateChart() {
+        const selectedWeight = document.getElementById('weightSelect').value;
+        
+        let datasets = [];
+        
+        if (selectedWeight === 'all') {
+            // Group by weight and create a dataset for each
+            const weightGroups = {};
+            allParsedData.forEach(point => {
+                if (!weightGroups[point.weight]) {
+                    weightGroups[point.weight] = [];
+                }
+                weightGroups[point.weight].push(point);
+            });
+            
+            const weightKeys = Object.keys(weightGroups).sort((a, b) => Number(a) - Number(b));
+            const colors = generateUniqueColors(weightKeys.length);
+            let colorIndex = 0;
+            
+            weightKeys.forEach(weight => {
+                const fullData = weightGroups[weight];
+                const startIndex = findDecelerationStart(fullData);
+                const stopIndex = findStopPoint(fullData, startIndex);
+                const decelerationData = fullData.slice(startIndex, stopIndex);
+                
+                if (decelerationData.length > 0) {
+                    // Reset time to start from 0 at deceleration start
+                    const startTime = decelerationData[0].time;
+                    const adjustedData = decelerationData.map(point => ({
+                        x: point.time - startTime,
+                        y: point.x
+                    }));
+                    
+                    const color = colors[colorIndex];
+                    
+                    datasets.push({
+                        label: `Weight ${weight}`,
+                        data: adjustedData,
+                        borderColor: color,
+                        backgroundColor: color + '20',
+                        fill: false,
+                        tension: 0.1,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        borderWidth: 2
+                    });
+                    
+                    colorIndex++;
+                }
+            });
+        } else {
+            // Show only selected weight
+            const fullData = allParsedData.filter(point => point.weight == selectedWeight);
+            const startIndex = findDecelerationStart(fullData);
+            const stopIndex = findStopPoint(fullData, startIndex);
+            const decelerationData = fullData.slice(startIndex, stopIndex);
+            
+            if (decelerationData.length > 0) {
+                // Reset time to start from 0 at deceleration start
+                const startTime = decelerationData[0].time;
+                const adjustedData = decelerationData.map(point => ({
+                    x: point.time - startTime,
+                    y: point.x
+                }));
+                
+                datasets.push({
+                    label: `Weight ${selectedWeight}`,
+                    data: adjustedData,
+                    borderColor: '#51cf66',
+                    backgroundColor: '#51cf6620',
+                    fill: false,
+                    tension: 0.1,
+                    pointRadius: 0,
+                    pointHoverRadius: 0,
+                    borderWidth: 2
+                });
+            }
+        }
+        
+        chart.data.datasets = datasets;
+        chart.update();
+    }
+
+    function updateStats() {
+        const weights = [...new Set(allParsedData.map(d => d.weight))];
+        const timeRange = allParsedData.length > 0 ? 
+            Math.max(...allParsedData.map(d => d.time)) - Math.min(...allParsedData.map(d => d.time)) : 0;
+        
+        // Calculate average deceleration (change in velocity over time)
+        let totalDeceleration = 0;
+        let decelerationCount = 0;
+        
+        weights.forEach(weight => {
+            const weightData = allParsedData.filter(d => d.weight === weight);
+            if (weightData.length > 1) {
+                for (let i = 1; i < weightData.length; i++) {
+                    const dx = weightData[i].x - weightData[i-1].x;
+                    const dt = weightData[i].time - weightData[i-1].time;
+                    if (dt > 0) {
+                        const velocity = dx / dt;
+                        totalDeceleration += Math.abs(velocity);
+                        decelerationCount++;
+                    }
+                }
+            }
+        });
+        
+        const avgDeceleration = decelerationCount > 0 ? (totalDeceleration / decelerationCount).toFixed(3) : 0;
+        
+        document.getElementById('totalEntries').textContent = allParsedData.length;
+        document.getElementById('uniqueWeights').textContent = weights.length;
+        document.getElementById('timeRange').textContent = timeRange.toFixed(1) + 's';
+        document.getElementById('avgDeceleration').textContent = avgDeceleration;
+        
+        document.getElementById('stats').style.display = 'grid';
+    }
+
+    function showMessage(text, type) {
+        const messageDiv = document.getElementById('message');
+        messageDiv.textContent = text;
+        messageDiv.className = type;
+        messageDiv.style.display = 'block';
+        
+        if (type === 'success') {
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 3000);
+        }
+    }
+</script>
+```
+
+</body>
+</html>
